@@ -66,6 +66,18 @@ module "blog_alb" {
       port             = 80
       target_type      = "instance"
       protocol_version = "HTTP1"
+
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 3
+        interval            = 30
+        matcher             = "200"
+        path                = "/"
+        port                = "traffic-port"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 3
+      }
     }
   }
 
@@ -75,10 +87,9 @@ module "blog_alb" {
       port     = 80
       protocol = "HTTP"
 
-      default_actions = [{
-        type               = "forward"
-        target_group_key   = "blog-tg"
-      }]
+      forward = {
+        target_group_key = "blog-tg"
+      }
     }
   }
 
