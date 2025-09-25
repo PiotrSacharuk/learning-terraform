@@ -17,7 +17,7 @@ data "aws_ami" "app_ami" {
 
 module "blog_vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  version = "6.2.0"
 
   name = var.environment.name
   cidr = "${var.environment.network_prefix}.0.0/16"
@@ -32,24 +32,53 @@ module "blog_vpc" {
 }
 
 
-module "blog_autoscaling" {
-  source  = "terraform-aws-modules/autoscaling/aws"
-  version = "7.4.1"
+resource "aws_launch_template" "blog" {
+  name_prefix   = "${var.environment.name}-blog-"
+  image_id      = data.aws_ami.app_ami.id
+  instance_type = var.instance_type
 
-  name = "${var.environment.name}-blog"
+  vpc_security_group_ids = [module.blog_sg.security_group_id]
 
-  min_size            = var.asg_min
-  max_size            = var.asg_max
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name        = "${var.environment.name}-blog"
+      Environment = var.environment.name
+    }
+  }
+}
+
+resource "aws_autoscaling_group" "blog" {
+  name                = "${var.environment.name}-blog"
   vpc_zone_identifier = module.blog_vpc.public_subnets
   target_group_arns   = [module.blog_alb.target_groups["blog-tg"].arn]
-  security_groups     = [module.blog_sg.security_group_id]
-  instance_type       = var.instance_type
-  image_id            = data.aws_ami.app_ami.id
+  health_check_type   = "ELB"
+
+  min_size         = var.asg_min
+  max_size         = var.asg_max
+  desired_capacity = var.asg_min
+
+  launch_template {
+    id      = aws_launch_template.blog.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "${var.environment.name}-blog-asg"
+    propagate_at_launch = false
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.environment.name
+    propagate_at_launch = false
+  }
 }
 
 module "blog_alb" {
   source  = "terraform-aws-modules/alb/aws"
-  version = "~> 9.0"
+  version = "10.0.0"
 
   name               = "${var.environment.name}-blog-alb"
   load_balancer_type = "application"
@@ -61,11 +90,12 @@ module "blog_alb" {
   # Target groups
   target_groups = {
     blog-tg = {
-      name_prefix      = "${substr(var.environment.name, 0, 6)}-"
-      protocol         = "HTTP"
-      port             = 80
-      target_type      = "instance"
-      protocol_version = "HTTP1"
+      name_prefix          = "${substr(var.environment.name, 0, 6)}-"
+      protocol             = "HTTP"
+      port                 = 80
+      target_type          = "instance"
+      protocol_version     = "HTTP1"
+      create_attachment    = false  # Autoscaling group zarządza attachments
 
       health_check = {
         enabled             = true
@@ -100,7 +130,7 @@ module "blog_alb" {
 
 module "blog_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "~> 5.0"
+  version = "5.3.0"
 
   vpc_id  = module.blog_vpc.vpc_id
   name    = "${var.environment.name}-blog"
