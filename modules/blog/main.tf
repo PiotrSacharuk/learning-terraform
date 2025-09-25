@@ -16,7 +16,8 @@ data "aws_ami" "app_ami" {
 
 
 module "blog_vpc" {
-  source = "terraform-aws-modules/vpc/aws"
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
 
   name = var.environment.name
   cidr = "${var.environment.network_prefix}.0.0/16"
@@ -40,7 +41,7 @@ module "blog_autoscaling" {
   min_size            = var.asg_min
   max_size            = var.asg_max
   vpc_zone_identifier = module.blog_vpc.public_subnets
-  target_group_arns   = module.blog_alb.target_group_arns
+  target_group_arns   = [module.blog_alb.target_groups["blog-tg"].arn]
   security_groups     = [module.blog_sg.security_group_id]
   instance_type       = var.instance_type
   image_id            = data.aws_ami.app_ami.id
@@ -48,32 +49,38 @@ module "blog_autoscaling" {
 
 module "blog_alb" {
   source  = "terraform-aws-modules/alb/aws"
-  version = "~> 6.0"
+  version = "~> 9.0"
 
-  name = "${var.environment.name}-blog-alb"
-
+  name               = "${var.environment.name}-blog-alb"
   load_balancer_type = "application"
 
-  vpc_id             = module.blog_vpc.vpc_id
-  subnets            = module.blog_vpc.public_subnets
-  security_groups    = [module.blog_sg.security_group_id]
+  vpc_id                = module.blog_vpc.vpc_id
+  subnets               = module.blog_vpc.public_subnets
+  security_groups       = [module.blog_sg.security_group_id]
 
-  target_groups = [
-    {
-      name_prefix      = "${var.environment.name}-"
-      backend_protocol = "HTTP"
-      backend_port     = 80
+  # Target groups
+  target_groups = {
+    blog-tg = {
+      name_prefix      = "${substr(var.environment.name, 0, 6)}-"
+      protocol         = "HTTP"
+      port             = 80
       target_type      = "instance"
+      protocol_version = "HTTP1"
     }
-  ]
+  }
 
-  http_tcp_listeners = [
-    {
-      port               = 80
-      protocol           = "HTTP"
-      target_group_index = 0
+  # Listeners
+  listeners = {
+    blog-listener = {
+      port     = 80
+      protocol = "HTTP"
+
+      default_actions = [{
+        type               = "forward"
+        target_group_key   = "blog-tg"
+      }]
     }
-  ]
+  }
 
   tags = {
     Environment = var.environment.name
@@ -82,7 +89,7 @@ module "blog_alb" {
 
 module "blog_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.13.0"
+  version = "~> 5.0"
 
   vpc_id  = module.blog_vpc.vpc_id
   name    = "${var.environment.name}-blog"
